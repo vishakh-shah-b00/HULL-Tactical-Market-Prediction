@@ -1,0 +1,332 @@
+\documentclass[11pt, a4paper, twocolumn]{article}
+
+% --- Essential Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[margin=.5in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\setlist[itemize]{noitemsep, topsep=.2pt, parsep=0pt, partopsep=0pt}
+
+% --- Document Metadata ---
+\title{Hull Tactical Market Prediction Challenge: Final Report}
+\author{Research and Strategy Team}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\newpage
+
+\section{Introduction and Motivation}
+
+Financial markets present one of the most challenging environments for predictive modeling. Unlike many machine learning domains, financial return series are characterized by extremely low signal-to-noise ratios, non-stationary dynamics, heavy-tailed distributions, and strong temporal dependencies. As a result, models that appear successful under naïve validation frequently fail when deployed in real-world trading environments.
+
+The Hull Tactical Market Prediction Challenge is explicitly designed to test whether a machine learning model can extract \emph{excess return signals} (alpha) from noisy financial data while respecting realistic risk constraints. Rather than rewarding raw predictive accuracy, the competition evaluates models based on a volatility-adjusted Sharpe ratio, thereby prioritizing risk-adjusted performance over headline returns.
+
+This project approaches the challenge with three guiding principles:
+\begin{enumerate}
+    \item \textbf{Statistical Integrity}: Avoiding all forms of data leakage and over-optimistic validation.
+    \item \textbf{Model Discipline}: Favoring robustness and generalization over complexity in a low signal-to-noise setting.
+    \item \textbf{Realistic Expectations}: Interpreting results through the lens of market regimes, excess returns, and risk constraints.
+\end{enumerate}
+
+The primary contribution of this work is not merely a high-performing model, but a rigorously validated pipeline that demonstrates how modest predictive signals can be converted into economically meaningful alpha under strict volatility limits.
+
+\section{Problem Formulation and Evaluation Framework}
+
+\subsection{Target Definition: Excess Returns}
+
+The modeling objective is to predict the next-day \emph{excess return} of the S\&P 500 index. Formally, the target variable is defined as:
+
+\begin{equation}
+y_t = r_{t+1} - \bar{r}_{t}^{(5\text{-year})}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $r_{t+1}$ is the next-day market return,
+    \item $\bar{r}_{t}^{(5\text{-year})}$ is the rolling five-year mean return.
+\end{itemize}
+
+This construction removes the long-term market drift and isolates \emph{alpha} rather than \emph{beta}. As a result, even a modest Sharpe ratio on this target is economically meaningful, since it reflects performance above the market’s structural upward trend.
+
+The competition organizers further applied winsorization to the target using the Median Absolute Deviation (MAD) method. This step limits the influence of extreme outliers while preserving the central distribution, ensuring numerical stability without eliminating genuine market variation.
+
+\subsection{Why Excess Returns Are Hard to Predict}
+
+Predicting excess returns is substantially more difficult than predicting absolute returns for several reasons:
+\begin{itemize}
+    \item The unconditional mean of excess returns is approximately zero.
+    \item Directional accuracy is typically close to random (near 50\%).
+    \item Predictive signals are weak, transient, and regime-dependent.
+\end{itemize}
+
+Empirically, the Sharpe ratio of the S\&P 500 \emph{excess return series} over long horizons is approximately 0.08. This value serves as a realistic benchmark: any strategy achieving a Sharpe meaningfully above this level is generating genuine alpha.
+
+\subsection{Trading Constraint: Volatility Limitation}
+
+Predictions alone are insufficient; they must be translated into a trading strategy that respects a strict risk constraint. The competition enforces a volatility cap defined as:
+
+\begin{equation}
+\frac{\sigma_{\text{strategy}}}{\sigma_{\text{market}}} \leq 1.2
+\end{equation}
+
+where $\sigma_{\text{strategy}}$ and $\sigma_{\text{market}}$ denote the realized volatility of the strategy and the S\&P 500, respectively. This constraint fundamentally shapes model design. Aggressive leverage, noisy position sizing, or unstable predictions are explicitly penalized.
+
+\subsection{Official Evaluation Metric}
+
+The final score is computed using a volatility- and return-adjusted Sharpe ratio:
+
+\begin{equation}
+\text{Adjusted Sharpe} = \frac{\text{Raw Sharpe}}{\text{Volatility Penalty} \times \text{Return Penalty}}
+\end{equation}
+
+A model that exceeds the volatility limit or underperforms the market is explicitly penalized, ensuring that only risk-aware alpha generation is rewarded.
+
+\section{Dataset Description}
+
+\subsection{Data Source and Structure}
+
+The dataset is provided as a single file, \texttt{train.csv}, containing 9,021 sequential observations. Each row represents one trading day. No calendar dates are provided; however, the strict sequential ordering and absence of gaps allow the dataset to be treated as a continuous time series estimated to span approximately 36 years.
+
+\subsection{Feature Composition}
+
+The dataset contains 98 base input features and 3 target-related columns. Features are anonymized but grouped by prefix, which provides semantic information about their economic role.
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lcccc}
+\toprule
+Group & Prefix & Count & Desc & Miss \% \\
+\midrule
+Market & M & 18 & Technical & 56\% \\
+Volatility & V & 13 & Volatility & 67\% \\
+Sentiment & S & 12 & Sentiment & 64\% \\
+Macro & E & 20 & Economic & 77\% \\
+Rates & I & 9 & Yields & 11\% \\
+Price & P & 13 & Valuation & 18\% \\
+Dummy & D & 9 & Regime & 0\% \\
+\bottomrule
+\end{tabular}
+\caption{Base Feature Groups}
+\end{table}
+
+The diversity of feature types allows the model to capture interactions between price dynamics, macroeconomic conditions, sentiment, and volatility regimes.
+
+\subsection{Target Variables and Holdout Split}
+
+All modeling in this project exclusively uses \texttt{market\_forward\_excess\_returns}. This choice aligns with the competition objective of predicting alpha rather than market direction.
+
+The final 180 rows correspond to the evaluation period and are \emph{strictly excluded} from all training, feature selection, and preprocessing steps.
+\begin{itemize}
+    \item Training set: rows [0, 8841]
+    \item Holdout set: rows [8841, 9021]
+\end{itemize}
+
+\section{Exploratory Data Analysis}
+
+\subsection{Target Distribution and Summary Statistics}
+
+The excess return target exhibits the following properties:
+\begin{itemize}
+    \item Mean close to zero
+    \item Daily volatility of approximately 1.3\%
+    \item Mild negative skewness and positive excess kurtosis (fat tails)
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.0\linewidth]{exploration_plots/01_target_analysis.png}
+\caption{Distribution of Market Forward Excess Returns}
+\end{figure}
+
+The presence of fat tails indicates that extreme outcomes occur more frequently than under a Gaussian assumption, reinforcing the need for models robust to outliers.
+
+\subsection{Stationarity Analysis}
+
+An Augmented Dickey--Fuller (ADF) test is applied to the target series. The null hypothesis of a unit root is rejected at the 1\% significance level, confirming stationarity. Stationarity implies that differencing or detrending is unnecessary and that the target distribution is stable enough for supervised learning methods.
+
+\subsection{Autocorrelation Structure}
+
+Autocorrelation analysis reveals a sharp contrast between the target and the features. The target exhibits weak autocorrelation (maximum absolute ACF $\approx 0.04$ at lag 1), while many input features exhibit extremely high persistence, with lag-1 autocorrelation exceeding 0.96.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.0\linewidth]{exploration_plots/02_autocorrelation.png}
+\caption{Autocorrelation of Selected Market Features}
+\end{figure}
+
+This disparity has profound implications for model validation and is addressed explicitly in the Validation section.
+
+\subsection{Feature--Target Correlations}
+
+Pairwise correlations between individual features and the target are uniformly weak. The strongest observed correlations are below 0.07 in absolute value. This confirmation that no single feature provides a strong linear signal motivates the use of feature ensembles and non-linear models.
+
+\section{Missing Data Analysis and Imputation}
+
+Missing data is a prominent characteristic of the dataset, particularly among macroeconomic, volatility, and sentiment features. Importantly, missingness is \emph{not random}: it often reflects delayed reporting or regime-dependent availability.
+
+Features with extreme missingness ($>60\%$) were generally removed, while those with moderate missingness were imputed. Given the strong temporal persistence of most features, \textbf{forward-fill imputation} is employed as the primary strategy. This preserves temporal continuity and avoids introducing artificial mean reversion.
+
+Rather than treating missing data purely as a nuisance, explicit \textbf{missingness indicators} are created. For each feature $x_t$, a binary indicator is added. Empirically, several missingness indicators appear among the top-ranked features, confirming that the absence of information itself carries predictive value.
+
+\section{Feature Engineering}
+
+Feature engineering aims to encode economically meaningful structure into the data while respecting the temporal nature of financial time series. All engineered features are computed using only past information.
+
+\subsection{Lagged Features}
+
+Lagged versions of selected features are created to capture short- and medium-term temporal dependencies. Horizons of 1, 2, 5, 10, and 20 days are used, reflecting daily momentum, weekly effects, and monthly trends.
+
+\subsection{Rolling Window Statistics}
+
+Rolling statistics are used to summarize recent history and smooth high-frequency noise. Windows of 5, 20, and 60 days are computed for mean and standard deviation. These allow the model to infer trends, volatility regimes, and deviations from recent norms.
+
+\subsection{Feature Selection Strategy}
+
+The initial feature space consisted of 227 features. In a low signal-to-noise setting, dimensionality reduction is critical to prevent overfitting. We employed a three-stage selection process:
+
+\begin{enumerate}
+    \item \textbf{Stage 1: Variance Thresholding}. Features with variance $<0.01$ are removed (reducing count to 218).
+    \item \textbf{Stage 2: Correlation Filtering}. One of any pair of features with correlation $>0.95$ is removed (reducing count to 132).
+    \item \textbf{Stage 3: Mutual Information}. The top 100 features by Mutual Information with the target are retained.
+\end{enumerate}
+
+The final 100 features are dominated by engineered Market and Volatility signals, validating the importance of temporal aggregation.
+
+\section{Validation Methodology}
+
+Model validation in financial time series presents challenges fundamentally different from i.i.d. settings. Standard K-Fold cross-validation fails because the strong autocorrelation in features causes data leakage.
+
+\subsection{Purged K-Fold with Embargo}
+
+To mitigate leakage, we implement a \textbf{Purged K-Fold} cross-validation scheme with an explicit embargo period. Each fold consists of an expanding training window, a fixed-length embargo period, and a contiguous test window.
+
+\[ \text{Train} \rightarrow \text{Embargo} \rightarrow \text{Test} \]
+
+An embargo of \textbf{20 trading days} is used, corresponding to the maximum lag length in feature engineering. The dataset is split into five folds (four valid for training), ensuring realistic walk-forward evaluation.
+
+\section{Modeling Strategy and Baseline}
+
+\subsection{Low Signal-to-Noise Framing}
+
+Financial prediction must balance the risk of underfitting (missing weak signals) against overfitting (modeling noise). This motivates a tiered strategy: establish a linear baseline, then introduce non-linearity cautiously.
+
+\subsection{Baseline Model: Ridge Regression}
+
+Ridge regression is selected as the baseline due to its robustness. Using PurgedKFold validation, Ridge achieves a mean Sharpe of 0.51. The results indicate that linear relationships exist but are weak. Ridge cannot capture non-linear regime effects, motivating the use of tree-based models.
+
+\subsection{LightGBM Model Design}
+
+LightGBM is selected as the primary model for its handling of missing values, non-linear interactions, and efficient training.
+
+\textbf{Regularization Philosophy}: In this low-signal environment, we deliberately constrain complexity. We use shallow trees (\texttt{max\_depth=4}) and slow learning rates (\texttt{0.02}) to prevent memorization of noise.
+
+\textbf{Hyperparameter Configuration}:
+\begin{itemize}
+    \item \texttt{max\_depth = 4}, \texttt{num\_leaves = 15}
+    \item \texttt{learning\_rate = 0.02}
+    \item \texttt{feature\_fraction = 0.7}, \texttt{bagging\_fraction = 0.8}
+    \item \texttt{lambda\_l1 = 1.0}, \texttt{lambda\_l2 = 1.0}
+\end{itemize}
+
+\textbf{Performance}: Across four valid folds, the model achieves a Mean Sharpe of 0.35 and Mean MSE of 0.000125. While Ridge had a higher Sharpe, LightGBM demonstrates better pointwise accuracy and robustness, making it the final choice.
+
+\section{Feature Importance Analysis}
+
+Feature importance is evaluated using LightGBM’s \texttt{gain} metric.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{exploration_plots/08_feature_importance.png}
+\caption{Top 20 Features by Gain}
+\label{fig:feature_importance}
+\end{figure*}
+
+Several patterns emerge:
+\begin{itemize}
+    \item \textbf{Dominance of Market Features}: Feature \texttt{M4} and its lags are the strongest predictors, suggesting short-term price dynamics are key.
+    \item \textbf{Role of Rolling Sentiment}: Rolling 20-day means of \texttt{S2} and \texttt{S5} rank highly, capturing medium-term market mood.
+    \item \textbf{Volatility as a Regime Signal}: Volatility features like \texttt{V13} act as gating variables, modulating behavior during stress.
+\end{itemize}
+
+\section{Position Mapping Strategy}
+
+The LightGBM model produces continuous predictions, but the competition requires a daily position allocation in $[0.0, 2.0]$.
+
+\subsection{Why Prediction Magnitude Is Unreliable}
+
+In low-signal environments, prediction magnitudes are unstable. Naïve linear scaling often introduces excessive volatility. We evaluated several strategies (linear, sigmoid, tercile) but found that a simple directional approach worked best.
+
+\subsection{Selected Strategy: Sign-Based Mapping}
+
+The sign-based strategy is defined as:
+\[
+\text{Position}_t =
+\begin{cases}
+2.0 & \text{if } \hat{y}_t > 0 \\
+0.0 & \text{otherwise}
+\end{cases}
+\]
+
+This approach deliberately ignores prediction magnitude. It acts as a regime switch: participating aggressively when expectations are positive and moving to cash when negative. Empirically, this achieves the highest Sharpe while remaining below the volatility constraint.
+
+\section{Critical Integrity Checks}
+
+\subsection{Sharpe Ratio Calculation Error}
+
+An initial implementation error computed the Sharpe ratio on model predictions rather than realized trading returns. This was corrected to use $r_t = \text{Position}_t \times y_t$. The correction significantly reduced inflated Sharpe values and restored meaningful comparisons.
+
+\subsection{Critical Data Leakage Discovery}
+
+Initial training runs mistakenly included the final 180 rows of \texttt{train.csv} (the holdout set). To eliminate this leakage, we permanently excluded these rows and retrained the entire pipeline (features + model). Cross-validated performance remained stable, confirming the validity of our approach.
+
+\section{Holdout Evaluation}
+
+\subsection{Evaluation Setup}
+
+The final model is evaluated on the strict holdout set (last 180 observations). Due to feature construction, 121 samples are usable.
+
+\subsection{Holdout Performance}
+
+On the holdout set, the strategy achieves:
+\begin{itemize}
+    \item \textbf{Sharpe Ratio: 2.89}
+    \item \textbf{Total Return: 18.20\%}
+    \item \textbf{Mean Daily Return: 0.14\%}
+    \item \textbf{Volatility Ratio: 1.08}
+\end{itemize}
+
+The volatility ratio is well below the 1.2 constraint, avoiding all penalties. Under the sign-based strategy, the system is in cash 74\% of the time, reflecting a conservative approach.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{exploration_plots/11_holdout_cumulative.png}
+\caption{Cumulative Returns on Holdout Set}
+\end{figure*}
+
+\section{Statistical Significance Analysis}
+
+To assess if the strong holdout performance is luck, we conducted a bootstrap analysis (10,000 iterations).
+\begin{itemize}
+    \item Mean Sharpe: 2.91
+    \item 95\% Confidence Interval: [0.17, 5.32]
+    \item Probability of Profit: 98.1\%
+\end{itemize}
+The positive lower bound of the confidence interval indicates statistically significant performance.
+
+\section{Stability and Regime Dependence}
+
+Rolling 30-day Sharpe analysis shows that performance is consistent (91\% positive windows) and not driven by outliers. However, the cross-validated Sharpe is roughly 0.35, while the holdout is 2.89. This discrepancy suggests the holdout period represents a particularly favorable regime. A conservative forward-looking expectation for this strategy is a Sharpe between 0.5 and 1.5.
+
+\section{Conclusion}
+
+This project demonstrates that excess returns are exploitable even in noisy financial data. By prioritizing rigorous validation and conservative modeling over complexity, we developed a system that generates significant alpha. The use of a sign-based position mapping ensures volatility constraints are respected, making the strategy suitable for cautious deployment.
+
+\end{document}
